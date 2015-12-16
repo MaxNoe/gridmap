@@ -163,12 +163,10 @@ def main(argv=None):
         sys.path.append(module_dir)
 
     # Start server
-    hostname = gethostname()
-    if not isinstance(hostname, bytes):
-        hostname = hostname.encode()
+    hostname = str(gethostname())
     cherrypy.quickstart(WebMonitor(),
-                        config={b'global': {b'server.socket_port': args.port,
-                                            b'server.socket_host': hostname}})
+                        config={'global': {'server.socket_port': args.port,
+                                            'server.socket_host': hostname}})
 
 
 if __name__ == "__main__":
