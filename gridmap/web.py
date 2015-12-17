@@ -35,7 +35,7 @@ import argparse
 import logging
 import sys
 from io import open
-from socket import gethostname
+import socket
 
 import cherrypy
 
@@ -64,6 +64,8 @@ class WebMonitor(object):
         display list of jobs
         """
         job_id = -1
+        print(80*"#")
+        print("send zmq message to adress: {}".format(address))
         jobs = _send_zmq_msg(job_id, "get_jobs", "", address)
 
         out_html = '''
@@ -147,6 +149,9 @@ def main(argv=None):
     parser.add_argument('-p', '--port',
                         help='Port for server to listen on.', type=int,
                         default=8076)
+
+    # parser.add_argument('-ip',help='Adress to sereve the stuff from.',type=string,
+    #                     default=8076)
     parser.add_argument('--version', action='version',
                         version='%(prog)s {0}'.format(__version__))
     args = parser.parse_args(argv)
@@ -163,10 +168,14 @@ def main(argv=None):
         sys.path.append(module_dir)
 
     # Start server
-    hostname = str(gethostname())
+    hostname = str(socket.gethostname())
+    ipadress = socket.gethostbyname(socket.gethostname())
+    print("Running on adress: {}".format(ipadress))
+
     cherrypy.quickstart(WebMonitor(),
                         config={'global': {'server.socket_port': args.port,
-                                            'server.socket_host': hostname}})
+                                           'server.socket_host': hostname }
+                                })
 
 
 if __name__ == "__main__":

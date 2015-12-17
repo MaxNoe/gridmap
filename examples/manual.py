@@ -54,7 +54,7 @@ def compute_factorial(n):
     """
     computes factorial of n
     """
-    sleep_walk(10)
+    sleep_walk(20)
     ret = 1
     for i in range(n):
         ret = ret * (i + 1)

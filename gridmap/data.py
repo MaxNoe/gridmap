@@ -32,11 +32,13 @@ from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
 import bz2
-try:
-    import cPickle as pickle  # For Python 2.x
-except ImportError:
-    import pickle
+# try:
+#     import cPickle as pickle  # For Python 2.x
+# except ImportError:
+#     import pickle
+
 import re
+import jsonpickle
 
 
 def zdumps(obj):
@@ -48,7 +50,7 @@ def zdumps(obj):
 
     :returns: An bz2-compressed pickle of the given object.
     """
-    return bz2.compress(pickle.dumps(obj, pickle.HIGHEST_PROTOCOL), 9)
+    return bz2.compress(jsonpickle.encode(obj).encode('utf-8'), 9)
 
 
 def zloads(pickled_data):
@@ -60,5 +62,4 @@ def zloads(pickled_data):
 
     :returns: An unpickled version of the compressed byte sequence.
     """
-    return pickle.loads(bz2.decompress(pickled_data))
-
+    return jsonpickle.decode(bz2.decompress(pickled_data).decode('utf-8'))

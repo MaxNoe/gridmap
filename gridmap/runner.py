@@ -233,7 +233,7 @@ def _run_job(job_id, address):
         logger.info("Finished job")
 
         # send back result
-        thank_you_note = _send_zmq_msg(job_id, "store_output", job, address)
+        thank_you_note = _sendzmsg(job_id, "store_output", job, address)
         logger.info(thank_you_note)
     # If anything goes wrong, send back the exception
     except Exception as e:
