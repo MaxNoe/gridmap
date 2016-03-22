@@ -45,7 +45,6 @@ import sys
 import traceback
 import functools
 import tempfile
-import signal
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -121,7 +120,7 @@ class Job(object):
 
     __slots__ = ('_f', 'args', 'id', 'kwlist', 'cleanup', 'ret', 'traceback',
                  'num_slots', 'mem_free', 'white_list', 'path', 'uniq_id',
-                 'name', 'queue', 'environment', 'working_dir',
+                 'name', 'queue','walltime', 'environment', 'working_dir',
                  'cause_of_death', 'num_resubmits', 'home_address',
                  'log_stderr_fn', 'log_stdout_fn', 'timestamp', 'host_name',
                  'heart_beat', 'track_mem', 'track_cpu', 'interpreting_shell',
@@ -660,7 +659,7 @@ def send_error_mail(job):
     """
     send out diagnostic email
     """
-    logger = logging.getLogger(__name__)
+    # logger = logging.getLogger(__name__)
 
     # create message
     subject = "GridMap error {}".format(job.name)
