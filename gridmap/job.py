@@ -127,7 +127,7 @@ class Job(object):
                  'copy_env', 'engine')
 
     def __init__(self, f, args, kwlist=None, cleanup=True, mem_free="1G",
-                 name='gridmap_job', num_slots=1, queue=DEFAULT_QUEUE,
+                 name='gridmap_job', num_slots=1, queue=DEFAULT_QUEUE, walltime=None,
                  interpreting_shell=None, copy_env=True, add_env=None,
                  engine='SGE'):
         """
@@ -149,6 +149,8 @@ class Job(object):
         :param num_slots: Number of slots this job should use.
         :type num_slots: int
         :param queue: SGE queue to schedule job on.
+        :type queue: str
+        :param queue: Expected walltime for the job in format: HH:MM:SS.
         :type queue: str
         :param engine: Indicates compatability with a grid engine. Either SGE or
                         TORQUE / PBS
@@ -186,6 +188,7 @@ class Job(object):
         self.white_list = []
         self.name = name.replace(' ', '_')
         self.queue = queue
+        self.walltime = walltime
         self.engine = engine
         self.interpreting_shell = interpreting_shell
         self.copy_env = copy_env
@@ -300,6 +303,12 @@ class Job(object):
 
         if self.queue:
             ret += " -q {}".format(self.queue)
+
+        if self.walltime:
+            if sge:
+                ret += " -l h_rt={}".format(self.walltime)
+            if pbs:
+                ret += " -l walltime={}".format(self.walltime)
 
         return ret
 
