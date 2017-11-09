@@ -150,8 +150,8 @@ class Job(object):
         :type num_slots: int
         :param queue: SGE queue to schedule job on.
         :type queue: str
-        :param queue: Expected walltime for the job in format: HH:MM:SS.
-        :type queue: str
+        :param walltime: Expected walltime for the job in format: HH:MM:SS.
+        :type walltime: str
         :param engine: Indicates compatability with a grid engine. Either SGE or
                         TORQUE / PBS
         :type engine: str
