@@ -124,12 +124,12 @@ class Job(object):
                  'cause_of_death', 'num_resubmits', 'home_address',
                  'log_stderr_fn', 'log_stdout_fn', 'timestamp', 'host_name',
                  'heart_beat', 'track_mem', 'track_cpu', 'interpreting_shell',
-                 'copy_env', 'engine')
+                 'copy_env', 'engine', 'walltime')
 
     def __init__(self, f, args, kwlist=None, cleanup=True, mem_free="1G",
                  name='gridmap_job', num_slots=1, queue=DEFAULT_QUEUE, walltime=None,
                  interpreting_shell=None, copy_env=True, add_env=None,
-                 engine='SGE'):
+                 engine='SGE', walltime=None):
         """
         Initializes a new Job.
 
@@ -185,6 +185,7 @@ class Job(object):
         self.ret = _JOB_NOT_FINISHED
         self.num_slots = num_slots
         self.mem_free = mem_free
+        self.walltime = walltime
         self.white_list = []
         self.name = name.replace(' ', '_')
         self.queue = queue
@@ -300,6 +301,10 @@ class Job(object):
         if self.white_list:
             if sge:
                 ret += " -l h={}".format('|'.join(self.white_list))
+
+        if self.walltime:
+            if pbs:
+                ret += " -l walltime={}".format(self.walltime)
 
         if self.queue:
             ret += " -q {}".format(self.queue)
