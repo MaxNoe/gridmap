@@ -813,6 +813,10 @@ def _submit_jobs(jobs, home_address, temp_dir=DEFAULT_TEMP_DIR, white_list=None,
             # remember address of submission host
             job.home_address = home_address
 
+            wait_sec = random.randuniform(0.1, 2.0)
+            logger.info("Waiting %s seconds before submitting next job", wait_sec)
+            time.sleep(wait_sec)
+
             # append jobs
             _append_job_to_session(session, job, temp_dir=temp_dir, quiet=quiet)
 
