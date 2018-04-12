@@ -44,6 +44,7 @@ import smtplib
 import sys
 import traceback
 import functools
+import tempfile
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -82,6 +83,8 @@ if DRMAA_PRESENT:
                        JobControlAction, JOB_IDS_SESSION_ALL, Session,
                        TIMEOUT_NO_WAIT)
 
+    import drmaa.errors
+
 # Python 2.x backward compatibility
 if sys.version_info < (3, 0):
     range = xrange
@@ -117,16 +120,16 @@ class Job(object):
 
     __slots__ = ('_f', 'args', 'id', 'kwlist', 'cleanup', 'ret', 'traceback',
                  'num_slots', 'mem_free', 'white_list', 'path', 'uniq_id',
-                 'name', 'queue', 'environment', 'working_dir',
+                 'name', 'queue','walltime', 'environment', 'working_dir',
                  'cause_of_death', 'num_resubmits', 'home_address',
                  'log_stderr_fn', 'log_stdout_fn', 'timestamp', 'host_name',
                  'heart_beat', 'track_mem', 'track_cpu', 'interpreting_shell',
-                 'copy_env', 'engine')
+                 'copy_env', 'engine', 'walltime')
 
     def __init__(self, f, args, kwlist=None, cleanup=True, mem_free="1G",
-                 name='gridmap_job', num_slots=1, queue=DEFAULT_QUEUE,
+                 name='gridmap_job', num_slots=1, queue=DEFAULT_QUEUE, walltime=None,
                  interpreting_shell=None, copy_env=True, add_env=None,
-                 engine='SGE'):
+                 engine='SGE', walltime=None):
         """
         Initializes a new Job.
 
@@ -147,6 +150,8 @@ class Job(object):
         :type num_slots: int
         :param queue: SGE queue to schedule job on.
         :type queue: str
+        :param walltime: Expected walltime for the job in format: HH:MM:SS.
+        :type walltime: str
         :param engine: Indicates compatability with a grid engine. Either SGE or
                         TORQUE / PBS
         :type engine: str
@@ -180,9 +185,11 @@ class Job(object):
         self.ret = _JOB_NOT_FINISHED
         self.num_slots = num_slots
         self.mem_free = mem_free
+        self.walltime = walltime
         self.white_list = []
         self.name = name.replace(' ', '_')
         self.queue = queue
+        self.walltime = walltime
         self.engine = engine
         self.interpreting_shell = interpreting_shell
         self.copy_env = copy_env
@@ -295,8 +302,18 @@ class Job(object):
             if sge:
                 ret += " -l h={}".format('|'.join(self.white_list))
 
+        if self.walltime:
+            if pbs:
+                ret += " -l walltime={}".format(self.walltime)
+
         if self.queue:
             ret += " -q {}".format(self.queue)
+
+        if self.walltime:
+            if sge:
+                ret += " -l h_rt={}".format(self.walltime)
+            if pbs:
+                ret += " -l walltime={}".format(self.walltime)
 
         return ret
 
@@ -340,6 +357,7 @@ class JobMonitor(object):
             self.port = self.socket.bind_to_random_port(self.interface)
         else:
             self.port = port
+            self.socket.bind("{}:{}".format(self.interface, port))
 
         self.home_address = "%s:%i" % (self.interface, self.port)
 
@@ -348,7 +366,7 @@ class JobMonitor(object):
         # uninitialized field (set in check method)
         self.jobs = []
         self.ids = []
-        self.session_id = None
+        self.session = None
         self.id_to_job = {}
 
     def __enter__(self):
@@ -366,28 +384,44 @@ class JobMonitor(object):
         self.socket.close()
 
         # Clean up if we have a valid session
-        if self.session_id is not None:
-            with Session(self.session_id) as session:
+        if self.session is not None:
                 # If we encounter an exception, kill all jobs
-                if exc_type is not None:
-                    self.logger.info('Encountered %s, so killing all jobs.',
-                                     exc_type.__name__)
-                    # try to kill off all old jobs
-                    try:
-                        session.control(JOB_IDS_SESSION_ALL,
-                                        JobControlAction.TERMINATE)
-                    except InvalidJobException:
-                        self.logger.debug("Could not kill all jobs for " +
-                                          "session.", exc_info=True)
-
-                # Get rid of job info to prevent memory leak
+            if exc_type is not None:
+                self.logger.info('Encountered %s, so killing all jobs.',    exc_type.__name__)
+                # try to kill off all old jobs
                 try:
-                    session.synchronize([JOB_IDS_SESSION_ALL], TIMEOUT_NO_WAIT,
-                                        dispose=True)
-                except ExitTimeoutException:
-                    pass
+                    self.logger.info('Sending Terminate for all jobs on Session {} '.format(self.session))
+                    self.session.control(JOB_IDS_SESSION_ALL,  JobControlAction.TERMINATE)
 
-    def check(self, session_id, jobs):
+                except InvalidJobException:
+                    self.logger.warn("Could not kill all jobs for session.", exc_info=True)
+
+                except drmaa.errors.InternalException:
+                    #cleanup in finaly clause below
+                    self.logger.warn("Could not kill all jobs for session.")
+                    pass
+            # Get rid of job info to prevent memory leak
+            try:
+                self.session.synchronize([JOB_IDS_SESSION_ALL], TIMEOUT_NO_WAIT,
+                                    dispose=True)
+            except ExitTimeoutException:
+                pass
+
+            finally:
+                #cleanup remaining jobs that cannot be kille by JOB_IDS_SESSION_ALL
+                for job in self.jobs:
+                    try:
+                        self.logger.info("Killing job {}".format(job.id))
+                        self.session.control(job.id,  JobControlAction.TERMINATE)
+                    except:
+                        pass
+
+                self.logger.info('Exiting drmaa session {}'.format(self.session))
+                self.session.exit()
+
+
+
+    def check(self, session, jobs):
         """
         serves input and output data
         """
@@ -395,8 +429,8 @@ class JobMonitor(object):
         self.jobs = jobs
         self.id_to_job = {job.id: job for job in self.jobs}
 
-        # keep track of DRMAA session_id (for resubmissions)
-        self.session_id = session_id
+        # keep track of DRMAA session (for resubmissions)
+        self.session = session
 
         # determines in which interval to check if jobs are alive
         self.logger.debug('Starting local hearbeat')
@@ -425,8 +459,7 @@ class JobMonitor(object):
                         if msg["command"] == "fetch_input":
                             return_msg = self.id_to_job[job_id]
                             job.timestamp = datetime.now()
-                            self.logger.debug("Received input request from %s",
-                                              job_id)
+                            self.logger.debug("Received input request from %s", job_id)
 
                         if msg["command"] == "store_output":
                             # be nice
@@ -438,13 +471,13 @@ class JobMonitor(object):
                                 # copy relevant fields
                                 job.ret = tmp_job.ret
                                 job.traceback = tmp_job.traceback
-                                self.logger.info("Received output from %s",
-                                                  job_id)
+                                self.logger.info("Received output from %s", job_id)
+                                if isinstance(job.ret, basestring) and len(job.ret) < 1000:
+                                    self.logger.info("Output was {}".format(job.ret) )
                             # Returned exception instead of job, so store that
                             elif isinstance(msg["data"], tuple):
                                 job.ret, job.traceback = msg["data"]
-                                self.logger.info("Received exception from %s",
-                                                  job_id)
+                                self.logger.info("Received exception from %s",  job_id)
                             else:
                                 self.logger.error(("Received message with " +
                                                    "invalid data: %s"), msg)
@@ -463,6 +496,10 @@ class JobMonitor(object):
                                                   exc_info=True)
                             return_msg = "all good"
                             job.timestamp = datetime.now()
+
+                            running_jobs = [ j for j in self.jobs if (len(j.track_cpu) > 0 and (isinstance(j.ret, basestring) and j.ret == _JOB_NOT_FINISHED))]
+                            usage = [j.track_cpu[-1][0]  for j in running_jobs]
+                            print("Total CPU usage: {} % for a total of {} running jobs.".format(sum(usage), len(running_jobs)), end='\r')
 
                         if msg["command"] == "get_job":
                             # serve job for display
@@ -551,7 +588,7 @@ class JobMonitor(object):
                 old_id = job.id
                 job.track_cpu = []
                 job.track_mem = []
-                handle_resubmit(self.session_id, job, temp_dir=self.temp_dir)
+                handle_resubmit(self.session, job, temp_dir=self.temp_dir)
                 # Update job ID if successfully resubmitted
                 self.logger.info('Resubmitted job %s; it now has ID %s',
                                  old_id,
@@ -604,7 +641,7 @@ def _send_mail(subject, body_text, attachments=None):
     msg["From"] = ERROR_MAIL_SENDER
     msg["To"] = ERROR_MAIL_RECIPIENT
 
-    logger.info('Email body: %s', body_text)
+    logger.info('Email Sent with subject : {}'.format(subject))
 
     body_msg = MIMEText(body_text)
     msg.attach(body_msg)
@@ -627,7 +664,7 @@ def send_error_mail(job):
     """
     send out diagnostic email
     """
-    logger = logging.getLogger(__name__)
+    # logger = logging.getLogger(__name__)
 
     # create message
     subject = "GridMap error {}".format(job.name)
@@ -672,7 +709,9 @@ def send_error_mail(job):
         time = [HEARTBEAT_FREQUENCY * i for i in range(len(job.track_mem))]
 
         # attack mem plot
-        img_mem_fn = os.path.join('/tmp', "{}_mem.png".format(job.id))
+        temp_dir = tempfile.mkdtemp()
+
+        img_mem_fn = os.path.join(temp_dir, "{}_mem.png".format(job.id))
         plt.figure(1)
         plt.plot(time, job.track_mem, "-o")
         plt.xlabel("time (s)")
@@ -687,7 +726,7 @@ def send_error_mail(job):
         attachments.append(img_mem_attachement)
 
         # attach cpu plot
-        img_cpu_fn = os.path.join("/tmp", "{}_cpu.png".format(job.id))
+        img_cpu_fn = os.path.join(temp_dir, "{}_cpu.png".format(job.id))
         plt.figure(2)
         plt.plot(time, [cpu_load for cpu_load, _ in job.track_cpu], "-o")
         plt.xlabel("time (s)")
@@ -710,7 +749,7 @@ def send_error_mail(job):
         os.unlink(img_mem_fn)
 
 
-def handle_resubmit(session_id, job, temp_dir=DEFAULT_TEMP_DIR):
+def handle_resubmit(session, job, temp_dir=DEFAULT_TEMP_DIR):
     """
     heuristic to determine if the job should be resubmitted
 
@@ -737,7 +776,7 @@ def handle_resubmit(session_id, job, temp_dir=DEFAULT_TEMP_DIR):
         job.num_resubmits += 1
         job.cause_of_death = ""
 
-        _resubmit(session_id, job, temp_dir)
+        _resubmit(session, job, temp_dir)
     else:
         raise JobException(("Job {0} ({1}) failed after {2} " +
                             "resubmissions").format(job.name, job.id,
@@ -805,23 +844,23 @@ def _submit_jobs(jobs, home_address, temp_dir=DEFAULT_TEMP_DIR, white_list=None,
 
     :returns: Session ID
     """
-    with Session() as session:
-        for job in jobs:
-            # set job white list
-            job.white_list = white_list
+    session = Session()
+    session.initialize()
+    for job in jobs:
+        # set job white list
+        job.white_list = white_list
 
-            # remember address of submission host
-            job.home_address = home_address
+        # remember address of submission host
+        job.home_address = home_address
 
-            wait_sec = random.randuniform(0.1, 2.0)
-            logger.info("Waiting %s seconds before submitting next job", wait_sec)
-            time.sleep(wait_sec)
+        wait_sec = random.randuniform(0.1, 2.0)
+        logger.info("Waiting %s seconds before submitting next job", wait_sec)
+        time.sleep(wait_sec)
 
-            # append jobs
-            _append_job_to_session(session, job, temp_dir=temp_dir, quiet=quiet)
+        # append jobs
+        _append_job_to_session(session, job, temp_dir=temp_dir, quiet=quiet)
 
-        sid = session.contact
-    return sid
+    return session
 
 
 def _append_job_to_session(session, job, temp_dir=DEFAULT_TEMP_DIR, quiet=True):
@@ -908,8 +947,9 @@ def process_jobs(jobs, temp_dir=DEFAULT_TEMP_DIR, white_list=None, quiet=True,
 
     :returns: List of Job results
     """
+
+    logger = logging.getLogger(__name__)
     if (not local and not DRMAA_PRESENT):
-        logger = logging.getLogger(__name__)
         if require_cluster:
             raise DRMAANotPresentException(
                 'Could not import drmaa, but cluster access required.'
@@ -919,23 +959,37 @@ def process_jobs(jobs, temp_dir=DEFAULT_TEMP_DIR, white_list=None, quiet=True,
 
     if not local:
         # initialize monitor to get port number
-        with JobMonitor(temp_dir=temp_dir, port=port) as monitor:
-            # get interface and port
-            home_address = monitor.home_address
+        try:
+            with JobMonitor(temp_dir=temp_dir, port=port) as monitor:
+                # get interface and port
+                home_address = monitor.home_address
 
-            # job_id field is attached to each job object
-            sid = _submit_jobs(jobs, home_address, temp_dir=temp_dir,
-                               white_list=white_list, quiet=quiet)
+                # job_id field is attached to each job object
+                session = _submit_jobs(jobs, home_address, temp_dir=temp_dir,
+                                   white_list=white_list, quiet=quiet)
 
-            # handling of inputs, outputs and heartbeats
-            monitor.check(sid, jobs)
+                # handling of inputs, outputs and heartbeats
+                logger.info("Started DRMAA session with Session {}".format(session))
+                monitor.check(session, jobs)
+        except KeyboardInterrupt:
+            print("JobMonitor killed.")
+            print("Caught KeyBoard interrupt. Returning intermediate results.")
+            return [job.ret for job in jobs]
+
+        if SEND_ERROR_MAIL:
+            send_completion_mail(name="gridmap job", jobs=jobs)
+        print("returning results so far")
+        return [job.ret for job in jobs]
+
+
     else:
         _process_jobs_locally(jobs, max_processes=max_processes)
+
 
     return [job.ret for job in jobs]
 
 
-def _resubmit(session_id, job, temp_dir):
+def _resubmit(session, job, temp_dir):
     """
     Resubmit a failed job.
 
@@ -945,17 +999,15 @@ def _resubmit(session_id, job, temp_dir):
     logger.info("starting resubmission process")
 
     if DRMAA_PRESENT:
-        # append to session
-        with Session(session_id) as session:
             # try to kill off old job
-            try:
-                session.control(job.id, JobControlAction.TERMINATE)
-                logger.info("zombie job killed")
-            except Exception:
-                logger.error("Could not kill job with SGE id %s", job.id,
-                             exc_info=True)
-            # create new job
-            _append_job_to_session(session, job, temp_dir=temp_dir)
+        try:
+            session.control(job.id, JobControlAction.TERMINATE)
+            logger.info("zombie job killed")
+        except Exception:
+            logger.error("Could not kill job with SGE id %s", job.id,
+                         exc_info=True)
+        # create new job
+        _append_job_to_session(session, job, temp_dir=temp_dir)
     else:
         logger.error("Could not restart job because we're in local mode.")
 
@@ -1043,21 +1095,42 @@ def grid_map(f, args_list, cleanup=True, mem_free="1G", name='gridmap_job',
 
     # send a completion mail (if requested and configured)
     if completion_mail and SEND_ERROR_MAIL:
-        send_completion_mail(name=name)
+        send_completion_mail(name=name,  jobs=jobs)
 
     return job_results
 
 
-def send_completion_mail(name):
+def send_completion_mail(name,  jobs):
     """
     send out success email
     """
     # create message
-    subject = "GridMap completed grid_map {}".format(name)
+    subject = "GridMap completed {}".format(name)
 
     # compose error message
     body_text = ""
     body_text += "Job {}\n".format(name)
+    body_text += "Collected results from {} jobs \n \n".format(len(jobs))
 
+    attachments = []
+    for job in jobs:
+        if job.heart_beat:
+            body_text += "Last memory usage: {}\n".format(job.heart_beat["memory"])
+            body_text += "Mean cpu load: {}\n".format(sum(job.heart_beat["cpu_load"])/len(job.heart_beat["cpu_load"]))
+            body_text += ("Process was running at last check: " +
+                          "{}\n\n").format(job.heart_beat["cpu_load"][1])
+
+        body_text += "Host: {}\n\n".format(job.host_name)
+
+        if isinstance(job.ret, Exception):
+            body_text += "Job encountered exception: {}\n".format(job.ret)
+            body_text += "Stacktrace: {}\n\n".format(job.traceback)
+
+        # attach log file
+        if job.heart_beat and "log_file" in job.heart_beat:
+            log_file_attachement = MIMEText(job.heart_beat['log_file'])
+            log_file_attachement.add_header('Content-Disposition', 'attachment',
+                                            filename='{}_log.txt'.format(job.id))
+            attachments.append(log_file_attachement)
     # Send mail
-    _send_mail(subject, body_text)
+    _send_mail(subject, body_text, attachments=attachments)
