@@ -274,14 +274,33 @@ def _main():
                               function. This will get added to PYTHONPATH \
                               temporarily.')
     args = parser.parse_args()
+    
+    if 'RND_LATENCY' in os.environ:
+        min_latency = 0
+        max_latency = 5
+        
+        if 'MAX_LATENCY' in os.environ:
+            max_latency = int(float(os.environ['MAX_LATENCY']))
+            
+        if 'MIN_LATENCY' in os.environ:
+            min_latency = int(float(os.environ['MIN_LATENCY']))
+         
+        if  min_latency > max_latency:
+            new_min_latency = max_latency
+            max_latency = min_latency
+            min_latency = new_min_latency
+            
+        wait_sec = random.randint(min_latency, max_latency)
+        time.sleep(wait_sec)
 
     # Make warnings from built-in warnings module get formatted more nicely
     logging.captureWarnings(True)
     logging.basicConfig(format=('%(asctime)s - %(name)s - %(levelname)s - ' +
                                 '%(message)s'), level=logging.INFO)
     logger = logging.getLogger(__name__)
-
     logger.info("Appended {0} to PYTHONPATH".format(args.module_dir))
+    if 'RND_LATENCY' in os.environ:
+        logger.info("Execution was delayed by {} sec.".format(wait_sec))
     sys.path.insert(0, args.module_dir)
 
     current_job_id = 0
