@@ -24,6 +24,15 @@ export ERROR_MAIL_SENDER="torque@hpc-main3.phido.physik.tu-dortmund.de"
 
 export SEND_ERROR_MAIL=TRUE
 
+##### optional 
+
+Set random excecution latency on node
+export RND_LATENCY=TRUE
+Set minimum random excecution latency on node
+export MIN_LATENCY=5
+Set maximum random excecution latency on node
+export MAX_LATENCY=30
+
 ### Python Requirements
 
 

@@ -45,6 +45,9 @@ import sys
 import traceback
 import functools
 import tempfile
+import random
+import time
+from tqdm import tqdm
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -124,12 +127,12 @@ class Job(object):
                  'cause_of_death', 'num_resubmits', 'home_address',
                  'log_stderr_fn', 'log_stdout_fn', 'timestamp', 'host_name',
                  'heart_beat', 'track_mem', 'track_cpu', 'interpreting_shell',
-                 'copy_env', 'engine', 'walltime')
+                 'copy_env', 'engine')
 
     def __init__(self, f, args, kwlist=None, cleanup=True, mem_free="1G",
                  name='gridmap_job', num_slots=1, queue=DEFAULT_QUEUE, walltime=None,
                  interpreting_shell=None, copy_env=True, add_env=None,
-                 engine='SGE', walltime=None):
+                 engine='SGE'):
         """
         Initializes a new Job.
 
@@ -189,7 +192,6 @@ class Job(object):
         self.white_list = []
         self.name = name.replace(' ', '_')
         self.queue = queue
-        self.walltime = walltime
         self.engine = engine
         self.interpreting_shell = interpreting_shell
         self.copy_env = copy_env
@@ -301,10 +303,6 @@ class Job(object):
         if self.white_list:
             if sge:
                 ret += " -l h={}".format('|'.join(self.white_list))
-
-        if self.walltime:
-            if pbs:
-                ret += " -l walltime={}".format(self.walltime)
 
         if self.queue:
             ret += " -q {}".format(self.queue)
@@ -823,7 +821,7 @@ def _process_jobs_locally(jobs, max_processes=1):
 
 
 def _submit_jobs(jobs, home_address, temp_dir=DEFAULT_TEMP_DIR, white_list=None,
-                 quiet=True):
+                 quiet=True, bunch_size=30, submission_latency=30):
     """
     Method used to send a list of jobs onto the cluster.
     :param jobs: list of jobs to be executed
@@ -846,15 +844,21 @@ def _submit_jobs(jobs, home_address, temp_dir=DEFAULT_TEMP_DIR, white_list=None,
     """
     session = Session()
     session.initialize()
-    for job in jobs:
+    cnt = 0
+    for job in tqdm(jobs):
         # set job white list
         job.white_list = white_list
 
         # remember address of submission host
         job.home_address = home_address
 
+        if cnt >= bunch_size:
+            time.sleep(submission_latency)
+            cnt = 0
+
         # append jobs
         _append_job_to_session(session, job, temp_dir=temp_dir, quiet=quiet)
+        cnt += 1
 
     return session
 
