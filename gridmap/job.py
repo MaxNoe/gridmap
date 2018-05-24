@@ -844,15 +844,21 @@ def _submit_jobs(jobs, home_address, temp_dir=DEFAULT_TEMP_DIR, white_list=None,
     """
     session = Session()
     session.initialize()
-    for job in jobs:
+    cnt = 0
+    for job in tqdm(jobs):
         # set job white list
         job.white_list = white_list
 
         # remember address of submission host
         job.home_address = home_address
 
+        if cnt >= 30:
+            time.sleep(30)
+            cnt = 0
+
         # append jobs
         _append_job_to_session(session, job, temp_dir=temp_dir, quiet=quiet)
+        cnt += 1
 
     return session
 
