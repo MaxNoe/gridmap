@@ -821,7 +821,7 @@ def _process_jobs_locally(jobs, max_processes=1):
 
 
 def _submit_jobs(jobs, home_address, temp_dir=DEFAULT_TEMP_DIR, white_list=None,
-                 quiet=True):
+                 quiet=True, bunch_size=30, submission_latency=30):
     """
     Method used to send a list of jobs onto the cluster.
     :param jobs: list of jobs to be executed
@@ -852,8 +852,8 @@ def _submit_jobs(jobs, home_address, temp_dir=DEFAULT_TEMP_DIR, white_list=None,
         # remember address of submission host
         job.home_address = home_address
 
-        if cnt >= 30:
-            time.sleep(30)
+        if cnt >= bunch_size:
+            time.sleep(submission_latency)
             cnt = 0
 
         # append jobs
