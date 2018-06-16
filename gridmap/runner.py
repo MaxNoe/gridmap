@@ -298,6 +298,9 @@ def _main():
     logging.basicConfig(format=('%(asctime)s - %(name)s - %(levelname)s - ' +
                                 '%(message)s'), level=logging.INFO)
     logger = logging.getLogger(__name__)
+    
+    if 'RND_LATENCY' in os.environ:
+        logger.info("Runner started with random latency ({} <= x <= {} ) of {} seconds".format(min_latency, max_latency, wait_sec))
     logger.info("Appended {0} to PYTHONPATH".format(args.module_dir))
     if 'RND_LATENCY' in os.environ:
         logger.info("Execution was delayed by {} sec.".format(wait_sec))
