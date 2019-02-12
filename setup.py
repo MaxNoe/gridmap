@@ -31,13 +31,7 @@ def readme():
     with open('README.md') as f:
         return f.read()
 
-
-def requirements():
-    with open('requirements.txt') as f:
-        reqs = f.read().splitlines()
-    return reqs
-
-
+    
 setup(name='gridmap',
       version=__version__,
       description=('Easily map Python functions onto a cluster using a ' +
@@ -49,7 +43,11 @@ setup(name='gridmap',
       author_email='dblanchard@ets.org',
       license='GPL',
       packages=['gridmap'],
-      install_requires=requirements(),
+      install_requires=[
+          'pyzmq',
+          'psutil',
+          'drmaa',
+      ],
       entry_points={'console_scripts': ['gridmap_web = gridmap.web:main']},
       classifiers=['Intended Audience :: Science/Research',
                    'Intended Audience :: Developers',
